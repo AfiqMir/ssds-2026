@@ -2,3 +2,9 @@ venv/
 *.csv
 data_pendukung/
 output/
+output_v2/
+output_blend/
+output_catboost_experiments/
+catboost_info/
+__pycache__/
+*.py[cod]
