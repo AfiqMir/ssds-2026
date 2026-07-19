@@ -173,6 +173,26 @@ lebih buruk daripada station-anchor maupun station-stack. Kandidat ini ditolak:
 peningkatan OOF tidak berpindah ke periode test dan memberi bukti bahwa recency
 weighting agresif tidak cukup stabil untuk submission utama.
 
+### 8. Eksperimen time-forward station bias
+
+`run_time_forward_bias_experiment.py` mengkalibrasi residual station-stack tanpa
+mengubah `run_station_aware_experiment.py`. Untuk setiap fold, koreksi hanya
+dihitung dari prediksi OOF model ber-origin lebih awal dan timestamp sebelum
+cutoff train fold tersebut. Grid OOF memilih residual per pos dengan half-life
+90 hari, `alpha=0,15`, dan decay 365 hari.
+
+| Model | Mean RMSE 4 fold | Pooled RMSE | RMSE API | Estimasi kompetisi |
+|---|---:|---:|---:|---:|
+| Station-stack kontrol | 1,43235 | 1,60829 | 0,843890 | 1,592617 |
+| Time-forward bias | **1,43022** | **1,60790** | **0,843630** | **1,592489** |
+
+Peningkatan API hanya 0,00026 RMSE dan estimasi kompetisi hanya 0,00013, jauh
+lebih kecil daripada residual RMSE kalibrasi API sebesar 0,01482. Selain itu,
+MAE API memburuk dari 0,55424 menjadi 0,55684 dan dua fold validasi sedikit
+memburuk. Karena itu kandidat diperlakukan sebagai eksperimen seri, bukan
+pengganti aman untuk station-stack. Jika tersedia slot submission tambahan,
+file ini dapat dipakai sebagai kandidat kedua.
+
 ## Ringkasan hasil CatBoost
 
 | Model | Mean RMSE 4 fold | Pooled RMSE | Keputusan |
