@@ -9,6 +9,7 @@ output_catboost_recency/
 output_lightgbm_residual/
 output_station_aware/
 output_time_forward_bias/
+output_global_local_hybrid/
 catboost_info/
 __pycache__/
 *.py[cod]

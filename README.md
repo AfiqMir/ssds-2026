@@ -193,6 +193,28 @@ memburuk. Karena itu kandidat diperlakukan sebagai eksperimen seri, bukan
 pengganti aman untuk station-stack. Jika tersedia slot submission tambahan,
 file ini dapat dipakai sebagai kandidat kedua.
 
+### 9. Eksperimen global/local station hybrid
+
+`run_global_local_hybrid_experiment.py` melatih LightGBM residual terpisah untuk
+setiap pos, lalu menggabungkannya dengan station-anchor CatBoost dan LightGBM
+global. Pos yang belum memiliki 180 observasi historis memakai LightGBM global
+sebagai fallback. Seleksi bobot memakai OOF empat fold yang sama dan diaudit
+dengan leave-one-fold-out pada tahap blending.
+
+| Model | Mean RMSE 4 fold | Pooled RMSE | RMSE API | Estimasi kompetisi |
+|---|---:|---:|---:|---:|
+| Station-stack kontrol | 1,43235 | 1,60829 | 0,843890 | 1,592617 |
+| Local LightGBM | 1,57042 | 1,70810 | 0,966141 | 1,656147 |
+| Global/local hybrid | **1,43225** | **1,60777** | **0,841681** | **1,591527** |
+
+Bobot OOF terpilih adalah 81% station-anchor, 14% LightGBM global, dan 5%
+LightGBM lokal. Walaupun metrik penuh membaik tipis, audit leave-one-fold-out
+memburuk pada keempat fold, dengan delta terburuk +0,0134. Peningkatan estimasi
+API sebesar 0,00109 juga jauh di bawah residual kalibrasi 0,01482. Karena itu
+hybrid diperlakukan sebagai kandidat serial/agresif, bukan pengganti aman untuk
+station-stack. Hasil ini juga menolak model lokal per pos sebagai arah prioritas
+berikutnya.
+
 ## Ringkasan hasil CatBoost
 
 | Model | Mean RMSE 4 fold | Pooled RMSE | Keputusan |
@@ -285,28 +307,14 @@ python run_catboost_rmse_anchor_experiment.py --retune-anchor-only
 
 ## Rencana eksperimen berikutnya
 
-### Prioritas 1 — Direct LightGBM residual
+### Eksperimen yang sudah diselesaikan
 
-Eksperimen berikutnya yang paling direkomendasikan:
+Direct LightGBM residual dan global/local station hybrid sudah dijalankan. Model
+lokal non-linear hanya mendapat bobot 5% dan tidak lolos audit
+leave-one-fold-out, sehingga arah ini tidak dilanjutkan tanpa hipotesis fitur
+lokal baru yang lebih spesifik.
 
-1. hitung baseline musiman secara leakage-safe dari kombinasi
-   `nama_pos × bulan × jam` pada train fold;
-2. ubah target menjadi `TMA - baseline_musiman`;
-3. latih LightGBM global direct pada feature table CatBoost yang sama;
-4. kembalikan prediksi ke skala asli dengan menambahkan baseline;
-5. cari bobot blend LightGBM–CatBoost hanya dari OOF prediction.
-
-Pendekatan residual diharapkan membuat model fokus pada perubahan TMA, bukan
-perbedaan elevasi dasar antarpos. LightGBM direct juga dapat memberi pola error
-yang berbeda dari CatBoost tanpa risiko recursive drift.
-
-### Prioritas 2 — Global/local station hybrid
-
-Bandingkan satu model global dengan model per pos atau per kelompok pos. Model
-lokal dipakai hanya ketika jumlah sampel historis memadai; model global menjadi
-fallback. Bobot global/local ditentukan dari OOF, bukan dari test prediction.
-
-### Prioritas 3 — State-space per pos
+### Prioritas 1 — State-space per pos
 
 Gunakan structural time-series/Kalman filter untuk memodelkan local level, tren,
 seasonality, dan beberapa fitur eksogen terpilih. Hasil state-space lebih cocok
@@ -314,7 +322,7 @@ sebagai komponen blend atau baseline residual daripada pengganti tunggal
 CatBoost. Eksperimen ini relevan karena state anchor sudah menunjukkan bahwa
 kondisi terakhir setiap pos mengandung sinyal.
 
-### Prioritas 4 — ExtraTrees residual
+### Prioritas 2 — ExtraTrees residual
 
 ExtraTrees dapat dicoba pada target residual untuk memperoleh model dengan error
 yang lebih beragam. Fokus utamanya bukan mengalahkan CatBoost secara standalone,
