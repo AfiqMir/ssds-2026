@@ -10,6 +10,8 @@ output_lightgbm_residual/
 output_station_aware/
 output_time_forward_bias/
 output_global_local_hybrid/
+output_state_space/
+output_station_supermodel/
 catboost_info/
 __pycache__/
 *.py[cod]

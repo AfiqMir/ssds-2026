@@ -215,6 +215,49 @@ hybrid diperlakukan sebagai kandidat serial/agresif, bukan pengganti aman untuk
 station-stack. Hasil ini juga menolak model lokal per pos sebagai arah prioritas
 berikutnya.
 
+### 10. Eksperimen state-space per pos
+
+`run_state_space_experiment.py` memfilter anomali setiap pos terhadap median
+musiman train-only dengan Kalman local-level/local-linear-trend. State terakhir
+diproyeksikan secara non-recursive dengan decay, lalu diuji sebagai koreksi
+CatBoost dan sebagai komponen blend station-stack. Konfigurasi terpilih adalah
+local-level cepat, decay 365 hari, dan alpha 0,90; blend OOF memberi bobot 18%
+untuk state-space.
+
+| Model | Mean RMSE 4 fold | Pooled RMSE | RMSE API | Estimasi kompetisi |
+|---|---:|---:|---:|---:|
+| Station-stack kontrol | 1,43235 | 1,60829 | 0,843890 | 1,592617 |
+| State-space standalone | 1,44042 | 1,61130 | 0,858823 | 1,600046 |
+| State-space blend | **1,43191** | **1,60760** | **0,843802** | **1,592574** |
+
+Peningkatan penuh sangat kecil. Audit leave-one-fold-out membaik pada dua fold,
+tetapi fold `may_2024` memburuk +0,01057 dan fold `sep_2024` memburuk +0,00240.
+Estimasi API juga hanya membaik 0,000043, jauh di bawah residual kalibrasi API
+0,01482. Karena itu state-space menguatkan bukti adanya sinyal state terakhir,
+tetapi blend ini ditolak sebagai pengganti aman dan station-stack tetap kontrol.
+
+### 11. Eksperimen shrunken station supermodel
+
+`run_station_supermodel_experiment.py` menguji mixture-of-experts per pos tanpa
+hard routing. Station-stack menjadi kontrol; expert hanya boleh dipakai jika
+mengalahkan kontrol pada seluruh meta-training fold dan memberi mean improvement
+minimal 0,01 RMSE. Prediksi expert kemudian di-shrink 50% ke station-stack.
+
+Audit outer leave-one-fold-out menjadi metrik utama:
+
+| Model | Mean RMSE 4 fold | Pooled RMSE | Worst fold delta |
+|---|---:|---:|---:|
+| Station-stack kontrol | 1,43235 | 1,60829 | — |
+| Shrunken supermodel LOFO | **1,43152** | **1,60786** | +0,000246 |
+
+Tiga fold membaik; `sep_2023` memburuk sangat kecil dan masih di bawah toleransi
+pra-deklarasi +0,001. Routing final mempertahankan station-stack pada 27 pos.
+`Bojonegoro - Kali Kethek` dan `Sekayu` memakai blend 50% expert recency, sedangkan
+`Jurug` memakai blend 50% station-anchor. Keputusan pra-API dibekukan sebelum
+verifikasi. Sesudah freeze, satu kali evaluasi menghasilkan RMSE API 0,845825 dan
+estimasi kompetisi 1,593575, lebih buruk 0,000958 daripada station-stack. Tidak
+ada retuning; keputusan akhir tetap mempertahankan station-stack kontrol.
+
 ## Ringkasan hasil CatBoost
 
 | Model | Mean RMSE 4 fold | Pooled RMSE | Keputusan |
@@ -305,24 +348,29 @@ submission yang sudah ada tanpa melatih ulang model:
 python run_catboost_rmse_anchor_experiment.py --retune-anchor-only
 ```
 
+Eksperimen state-space per pos:
+
+```bash
+python run_state_space_experiment.py
+```
+
+Eksperimen shrunken station supermodel:
+
+```bash
+python run_station_supermodel_experiment.py
+```
+
 ## Rencana eksperimen berikutnya
 
 ### Eksperimen yang sudah diselesaikan
 
-Direct LightGBM residual dan global/local station hybrid sudah dijalankan. Model
-lokal non-linear hanya mendapat bobot 5% dan tidak lolos audit
-leave-one-fold-out, sehingga arah ini tidak dilanjutkan tanpa hipotesis fitur
-lokal baru yang lebih spesifik.
+Direct LightGBM residual, global/local station hybrid, state-space per pos, dan
+shrunken station supermodel sudah dijalankan. Model lokal non-linear hanya
+mendapat bobot 5% dan tidak lolos audit leave-one-fold-out. State-space blend
+juga gagal pada satu held-out fold. Supermodel konservatif lolos audit pra-API,
+tetapi peningkatannya kecil sehingga parameternya dibekukan tanpa tuning lanjutan.
 
-### Prioritas 1 — State-space per pos
-
-Gunakan structural time-series/Kalman filter untuk memodelkan local level, tren,
-seasonality, dan beberapa fitur eksogen terpilih. Hasil state-space lebih cocok
-sebagai komponen blend atau baseline residual daripada pengganti tunggal
-CatBoost. Eksperimen ini relevan karena state anchor sudah menunjukkan bahwa
-kondisi terakhir setiap pos mengandung sinyal.
-
-### Prioritas 2 — ExtraTrees residual
+### Prioritas 1 — ExtraTrees residual
 
 ExtraTrees dapat dicoba pada target residual untuk memperoleh model dengan error
 yang lebih beragam. Fokus utamanya bukan mengalahkan CatBoost secara standalone,
@@ -351,6 +399,23 @@ Semua kandidat baru harus:
 6. memeriksa NaN, infinity, duplikasi ID, rentang prediksi per pos, dan kesesuaian
    urutan dengan `sample_submission.csv` sebelum submit;
 7. mencatat skor public leaderboard tanpa menggunakannya untuk tuning berulang.
+
+### Protokol aman `API_TEST`
+
+`API_TEST` diperlakukan sebagai holdout eksternal yang dikarantina dari proses
+eksperimen. Feature engineering, training, tuning, pemilihan model, dan bobot
+blend hanya boleh menggunakan train, empat rolling-origin fold, serta audit
+leave-one-fold-out/stress fold.
+
+Sebelum evaluator API dijalankan, keputusan pra-API dan seluruh parameter
+kandidat harus sudah dibekukan di `experiment_summary.json`. Skor API hanya
+dicatat sesudahnya sebagai pemeriksaan transfer satu arah dan tidak boleh dipakai
+untuk retuning, reweighting, atau memilih varian lanjutan. Evaluasi berulang pada
+varian yang hampir identik dihindari; maksimal satu kandidat utama dan satu
+kandidat agresif yang keduanya telah didukung OOF secara independen.
+
+Aturan operasional lengkap untuk agent dan analisis ad-hoc tercantum di
+`AGENTS.md`.
 
 Pos yang tetap perlu dianalisis secara khusus berdasarkan pipeline awal adalah
 `Bojonegoro - Kali Kethek`, `Wonogiri Dam`, `Cepu`, dan `Jurug`.
